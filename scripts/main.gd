@@ -10,6 +10,19 @@ extends Node2D
 ##                moves instantly (predicted, then corrected by the host's state); the host's
 ##                fighter and bullets are shown slightly in the past, interpolated, so they
 ##                move smoothly.
+##
+## This file is the game-specific glue. Sections, and what to copy into another game
+## (docs/REUSE.md walks through it):
+##   _setup_local / _setup_host / _setup_guest   how each mode wires PhoneControllers, the
+##                                              touch controls and OnlineGuest to the players
+##   "Phones (local mode)"     assigning phones to player slots: copy and adapt
+##   "Online: host"            _send_snapshot + the _acked_seq line in _physics_process: the
+##                             host half of the netcode; replace the state it packs
+##   "Online: guest"           _guest_tick (sample + send input, predict), _on_snapshot /
+##                             _apply_snapshot (rewind + replay), _render_remote (interpolate):
+##                             the guest half; the pattern is reusable, the state is not
+##   _layout                   fitting the view + control panels to any screen/orientation
+##   "Arena", "HUD & lobby"    this game only
 
 const ARENA := Rect2(40, 90, 1200, 590)
 const WALL_THICKNESS := 40.0

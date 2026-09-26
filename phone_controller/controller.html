@@ -1,4 +1,17 @@
 <!doctype html>
+<!--
+  Phone controller page ("Play on this screen" mode). One self-contained file, no dependencies.
+  Served by the game itself in LAN mode (?s=SESSION) or by the relay (?r=ROOM; redeploy the relay
+  after changing this file: cd relay && npm run deploy).
+
+  To reuse in another game:
+    - Buttons: each <button data-btn="NAME"> sends NAME to the game (PhoneControllers.button_pressed,
+      Player.is_pressed). Add, remove or rename buttons here; the game receives whatever names you use.
+      "start" is the small top button (NEXT ROUND here).
+    - Look: colours and layout are in <style> (the .face grid-area rules place the four buttons).
+    - Protocol: see the header of phone_controller_server.gd (hello / in / ping, and the game's
+      welcome / theme / msg / vibrate / reject replies, handled in onMessage below).
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8">

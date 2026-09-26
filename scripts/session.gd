@@ -1,9 +1,14 @@
 extends Node
-## Autoload "Session": what the player picked in the menu, read by the arena.
+## Autoload "Session": what the player picked in the menu, handed to the game scene. Also reads
+## ?join=CODE from the page address (web builds) and switches the UI between a landscape and a
+## portrait design size so the game fits any screen. Reusable as is; change PAGES_URL.
 
+## LOCAL: one screen, phones as controllers / keyboard. ONLINE_HOST: this device runs the match
+## and a friend joins with the code. ONLINE_GUEST: this device joined a friend's match.
 enum Mode { LOCAL, ONLINE_HOST, ONLINE_GUEST }
 
-## Web build hosted where a ?join=CODE link opens the game and joins straight away.
+## Where the web build is hosted: invite links are PAGES_URL?join=CODE, which open the game and
+## join straight away. Change this for your own game.
 const PAGES_URL := "https://jalaad.github.io/GameJam-PvP-Online/"
 
 var mode := Mode.LOCAL
@@ -45,7 +50,7 @@ func _fit_orientation() -> void:
 static func clean_code(text: String) -> String:
 	var out := ""
 	for ch in text.to_upper():
-		if PhoneControllerServer._CODE_CHARS.contains(ch):
+		if PhoneControllerServer.CODE_CHARS.contains(ch):
 			out += ch
 	return out.left(4)
 

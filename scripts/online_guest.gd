@@ -1,17 +1,33 @@
 class_name OnlineGuest
 extends Node
-## The guest side of an online match: joins the host's relay room like a phone controller would,
-## sends this player's input and receives the host's game state. In web builds it also accepts
-## the host's offer of a direct WebRTC link, which then carries input and state (lower latency);
-## the relay stays as the fallback and for everything else.
+## The guest side of an online match (the host side is PhoneControllerServer). Game-agnostic:
+## it moves messages, the game decides what they mean. See docs/REUSE.md.
+##
+## Joins the host's relay room as if it were a phone controller (hello with a token, so a page
+## reload gets the same player slot back), sends this player's input and receives the host's
+## game state. In web builds it also accepts the host's offer of a direct WebRTC link, which then
+## carries input and state (lower latency); the relay stays as the fallback and for everything else.
+##
+##   var guest := OnlineGuest.new()
+##   add_child(guest)
+##   guest.snapshot.connect(func(st): ...)          # host's "st" messages (game state)
+##   guest.failed.connect(func(reason): ...)        # bad code / match full: show reason
+##   guest.join("K7QD")
+##   # every physics tick:
+##   guest.send_fast({"t": "in", "q": seq, "x": stick.x, "y": stick.y, "b": held, "pc": press_counts})
+##
+## Needs the PhoneControllers autoload only for get_relay_url() and the shared constants.
 
+## The host accepted us; player_id is our slot on the host (PhoneControllers id there).
 signal joined(player_id: int)
 ## Could not join (bad code, match full...). reason is shown to the player.
 signal failed(reason: String)
-## The link dropped; we're trying again.
+## The link dropped; we're trying again (with the same token, so we keep our slot).
 signal reconnecting
+## A game-state message from the host ({"t": "st", ...}; the contents are up to the game).
 signal snapshot(state: Dictionary)
-signal message(msg: Dictionary)  # "msg", "vibrate", "theme" etc. from the host
+## Any other message from the host: "msg", "vibrate", "theme", or the game's own types.
+signal message(msg: Dictionary)
 
 const _RETRY_SEC := 1.5
 const _PING_SEC := 1.0
@@ -108,7 +124,7 @@ func _process(_delta: float) -> void:
 			if not _hello_sent:
 				_hello_sent = true
 				send({"t": "hello", "s": code, "name": _name, "token": _token,
-						"rtc": PhoneControllerServer._rtc_supported()})
+						"rtc": PhoneControllerServer.rtc_supported()})
 			while _ws.get_available_packet_count() > 0:
 				_on_text(_ws.get_packet().get_string_from_utf8())
 			if _welcomed and now - _last_ping > _PING_SEC:

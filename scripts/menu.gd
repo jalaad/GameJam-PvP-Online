@@ -166,7 +166,7 @@ func _build_join() -> Control:
 	grid.columns = 8
 	grid.add_theme_constant_override("h_separation", 6)
 	grid.add_theme_constant_override("v_separation", 6)
-	for ch in PhoneControllerServer._CODE_CHARS:
+	for ch in PhoneControllerServer.CODE_CHARS:
 		var key := ch
 		grid.add_child(_button(key, Vector2(76, 64), 28, Color("#4a5268"), func() -> void: _type(key)))
 	var grid_center := CenterContainer.new()

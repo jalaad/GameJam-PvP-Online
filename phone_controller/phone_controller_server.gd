@@ -1,43 +1,66 @@
 class_name PhoneControllerServer
 extends Node
-## Turns phones into game controllers.
+## The game's side of every remote connection. Add as an autoload named "PhoneControllers".
+## Game-agnostic: nothing in here knows about fighters or arenas; see docs/REUSE.md.
 ##
-## Add this script as an autoload named "PhoneControllers". Two ways to reach phones:
+## Each connected device is a Player (id, name, colour, stick, held buttons). Two kinds of
+## device join the same way:
+##   - Phone controllers: controller.html in a phone browser (the "Play on this screen" mode).
+##   - Game clients: another copy of the game joining an online match (OnlineGuest). The game
+##     treats it like a phone, and can also send it game state with send() / send_fast().
 ##
-##   LAN mode (desktop builds): the game itself serves controller.html over HTTP (port 8080)
-##   and receives input over WebSocket (port 8081). Phones must be on the same Wi-Fi.
+## How devices reach this game (start(mode)):
+##   LAN   (desktop builds): the game serves controller.html over HTTP (http_port, 8080) and takes
+##         input over WebSocket (ws_port, 8081). Devices must be on the same Wi-Fi.
+##   Relay (web builds, and online matches): the game connects out to the relay (relay/ in this
+##         repo) and opens a room; session_code is the room code. The relay serves the phone page
+##         over HTTPS and forwards messages. Devices can be on any network.
+##   "auto" = relay in web builds, LAN elsewhere. Defaults: DEFAULT_MODE / DEFAULT_RELAY_URL below,
+##   or the Project Settings phone_controllers/mode and phone_controllers/relay_url.
 ##
-##   Relay mode (web builds, e.g. itch.io): the game connects out to a relay server
-##   (see relay/ in this repo) which serves the page over HTTPS and forwards messages.
-##   Phones can be on any network.
+## Direct link (web builds only): a game client that says "rtc": true in its hello is offered a
+## WebRTC peer connection with one unreliable data channel. The offer/answer/ICE messages travel
+## over the normal connection; once open, send_fast() and the client's input use the direct link
+## (lower latency); if it never opens, everything keeps using the normal connection.
 ##
-## Mode and relay address: DEFAULT_MODE / DEFAULT_RELAY_URL below, optionally overridden by the
-## Project Settings phone_controllers/mode and phone_controllers/relay_url (or an override.cfg).
-## "auto" = relay in web builds, LAN everywhere else.
+## Messages (JSON objects, key "t" is the type):
+##   device -> game  hello {s: session code, name, token, rtc?}  join / rejoin (same token = same slot)
+##                   in    {x, y, b: [held buttons], q?: seq, pc?: {button: press count}}
+##                   ping  {ts}                                   -> pong {ts}
+##                   rtc_sdp {type, sdp} / rtc_ice {media, index, name}   (direct link setup)
+##   game -> device  welcome {id, name, color} / reject {reason}
+##                   theme {color, name} / msg {text, ms} / vibrate {ms | pattern}
+##                   anything the game sends with send() / send_fast() (e.g. "st" snapshots)
 ##
-## Show players get_join_url() (or make_qr_texture()) so they can scan in. In relay mode the
-## URL is only ready once join_url_changed fires.
-##
-##   func _process(delta):
-##       for p in PhoneControllers.get_players():
-##           velocity = p.stick * speed          # Vector2, y+ is down
-##           if p.is_pressed(&"attack"): ...
+## Typical use (phones as controllers):
+##   PhoneControllers.start()                       # then show make_qr_texture() once can_join
+##   for p in PhoneControllers.get_players():
+##       velocity = p.stick * speed                 # Vector2, y+ is down
+##       if p.is_pressed(&"attack"): ...
+##   PhoneControllers.button_pressed.connect(...)  # one event per tap, never missed
 
+## A new device took a player slot (phone controller or online guest).
 signal player_joined(player_id: int)
 ## The phone dropped (screen lock, Wi-Fi blip). The slot is kept for reconnect_grace_sec.
 signal player_disconnected(player_id: int)
 signal player_reconnected(player_id: int)
 ## The player is gone for good (grace period expired or kicked).
 signal player_left(player_id: int)
+## A button went down. Button names come from the device: data-btn="..." in controller.html,
+## or whatever a game client puts in "b" / "pc".
 signal button_pressed(player_id: int, button: StringName)
 signal button_released(player_id: int, button: StringName)
-## Fired when phones can (or can no longer) join; the join URL is valid while can_join is true.
+## Fired when devices can (or can no longer) join; message is a status line for the lobby.
 signal status_changed(can_join: bool, message: String)
+## The join URL is ready (or changed). In relay mode this happens once the room is open.
 signal join_url_changed(url: String)
 
+## LAN mode ports: the phone page (HTTP) and input (WebSocket).
 @export var http_port := 8080
 @export var ws_port := 8081
+## More devices than this are turned away with reject {reason: "full"}.
 @export var max_players := 8
+## How long a dropped device keeps its player slot (and can come back with the same token).
 @export var reconnect_grace_sec := 30.0
 ## Force the address in the join URL (e.g. "192.168.1.20") if auto-detection picks the wrong adapter.
 @export var host_override := ""
@@ -45,9 +68,12 @@ signal join_url_changed(url: String)
 ## player picks a mode in the menu.
 @export var auto_start := false
 
+## The phone controller page (served in LAN mode; the relay serves its own copy, see relay/).
 const PAGE_PATH := "res://phone_controller/controller.html"
+## Default colour per player id (the game can re-theme a phone with set_player_theme()).
 const COLORS := ["#4cc9f0", "#f72585", "#b8f35a", "#ffb703", "#9b5de5", "#ff6b35", "#2ec4b6", "#e0e0e0"]
-const _CODE_CHARS := "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+## Characters used in session/room codes (no 0/O or 1/I, so codes are easy to read and type).
+const CODE_CHARS := "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 ## Relay used by web builds. Override per project with the Project Setting phone_controllers/relay_url.
 const DEFAULT_RELAY_URL := "wss://pvp-phone-relay.pvp-phone-relay.workers.dev"
 ## "auto" = relay in web builds, LAN elsewhere. Override with phone_controllers/mode ("lan" / "relay").
@@ -58,6 +84,7 @@ const _RELAY_RETRY_SEC := 2.0
 const ICE_SERVERS := [{"urls": ["stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478"]}]
 
 
+## One connected device. Read stick / buttons every frame, or use the button signals.
 class Player:
 	var id: int
 	var name: String
@@ -99,6 +126,7 @@ var session_code := ""
 var players := {}  # id -> Player
 ## True when phones can join (LAN servers listening, or relay room open).
 var can_join := false
+## Human-readable status for the lobby ("Connecting to the relay server…" etc.).
 var status_message := ""
 
 var _http_server := TCPServer.new()
@@ -127,21 +155,24 @@ func _ready() -> void:
 		start()
 
 
-func get_relay_url() -> String:
-	return _relay_url
-
-
 func _exit_tree() -> void:
 	stop()
 
 
 # --- Public API -------------------------------------------------------------
 
+## Relay address (wss://...), also used by OnlineGuest to join a host's room.
+func get_relay_url() -> String:
+	return _relay_url
+
+
+## True when devices connect through the relay (see start()).
 func is_relay_mode() -> bool:
 	return _use_relay
 
 
 ## force_mode: "" (use the phone_controllers/mode setting, default auto), "lan" or "relay".
+## Opens a new session (new session_code). Returns OK or an error if LAN ports are in use.
 func start(force_mode := "") -> Error:
 	stop()
 	var mode := force_mode
@@ -162,6 +193,7 @@ func start(force_mode := "") -> Error:
 	return _start_lan()
 
 
+## Disconnects everyone and closes the servers / relay room (player_left fires for each player).
 func stop() -> void:
 	for c in _connections.duplicate():
 		_close_connection(c, 1001, "server_stopped")
@@ -182,6 +214,7 @@ func stop() -> void:
 		player_left.emit(id)
 
 
+## The URL a phone opens to join (what the QR code contains).
 func get_join_url() -> String:
 	if _use_relay:
 		var base := _relay_url.replace("wss://", "https://").replace("ws://", "http://")
@@ -194,19 +227,23 @@ func make_qr_texture(pixels_per_module := 8) -> ImageTexture:
 	return QrCode.make_texture(get_join_url(), pixels_per_module)
 
 
+## All players, connected or waiting to reconnect (check Player.connected).
 func get_players() -> Array:
 	return players.values()
 
 
+## null if there is no such player.
 func get_player(id: int) -> Player:
 	return players.get(id)
 
 
+## Shortcut: that player's stick, or ZERO if there is no such player.
 func get_stick(id: int) -> Vector2:
 	var p := get_player(id)
 	return p.stick if p else Vector2.ZERO
 
 
+## Shortcut: is that player holding the button?
 func is_pressed(id: int, button: StringName) -> bool:
 	var p := get_player(id)
 	return p != null and p.is_pressed(button)
@@ -250,6 +287,7 @@ func set_player_theme(id: int, color: Color, label: String) -> void:
 	_send_to(id, {"t": "theme", "color": "#" + color.to_html(false), "name": label})
 
 
+## Remove a player now (the device is told "kicked" and disconnected).
 func kick(id: int) -> void:
 	var p := get_player(id)
 	if p == null:
@@ -317,7 +355,7 @@ func _expire_dropped_players(now: float) -> void:
 func _new_session_code() -> void:
 	session_code = ""
 	for i in 4:
-		session_code += _CODE_CHARS[randi() % _CODE_CHARS.length()]
+		session_code += CODE_CHARS[randi() % CODE_CHARS.length()]
 
 
 func _set_status(is_ready: bool, message: String) -> void:
@@ -533,7 +571,7 @@ func _on_message(c: _Connection, msg: Dictionary, fast := false) -> void:
 		"hello":
 			_handle_hello(c, msg)
 			# Browser game clients offer a direct link; the phone controller page doesn't ask for one.
-			if c.player and msg.get("rtc", false) and _rtc_supported():
+			if c.player and msg.get("rtc", false) and rtc_supported():
 				_start_rtc(c)
 		"in":
 			if c.player:
@@ -681,7 +719,7 @@ func _send_fast(c: _Connection, msg: Dictionary) -> void:
 # pre-agreed unreliable data channel; offer/answer/candidates travel as rtc_sdp / rtc_ice
 # messages over the normal connection. If it never opens, everything keeps using that.
 
-static func _rtc_supported() -> bool:
+static func rtc_supported() -> bool:
 	return OS.has_feature("web")  # desktop Godot needs the webrtc-native extension
 
 

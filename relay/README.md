@@ -1,13 +1,19 @@
 # Relay (Cloudflare Workers)
 
-Lets the **browser build** of the game (e.g. on itch.io) reach phones. A browser game can't run a
-server, so both the game and the phones connect *out* to this relay, which pairs them by room code.
+Pairs a game with the devices joining it, by room code. A browser game can't run a server, so both
+sides connect *out* to this relay. It's used for:
+
+- **Phone controllers** with the browser build (GitHub Pages, itch.io): phones open the controller page
+  from the relay and send their input through it.
+- **Online matches** (phone vs phone, any build): the guest's game joins the host's room just like a phone
+  controller would. In browsers the relay also carries the WebRTC offer/answer so the two phones can open
+  a direct link; if that fails, input and game state keep flowing through the relay.
 
 ```
-game (browser, wss) ──► /ws/host/CODE ─┐
-                                       ├─ Room CODE (Durable Object) forwards messages both ways
-phone (browser, wss) ─► /ws/phone/CODE ┘
-phone opens            /?r=CODE        ── the controller page (copied from ../phone_controller/controller.html)
+game / match host ──────► /ws/host/CODE ─┐
+                                         ├─ Room CODE (Durable Object) forwards messages both ways
+phone / match guest ────► /ws/phone/CODE ┘
+phone opens               /?r=CODE        ── the controller page (copied from ../phone_controller/controller.html)
 ```
 
 Live at: `https://pvp-phone-relay.pvp-phone-relay.workers.dev` (`DEFAULT_RELAY_URL` in
@@ -44,7 +50,10 @@ exact limits.
 
 ## Notes
 
-- Rooms are 4-character codes chosen by the game; if one is taken the game picks another.
-- If the game disconnects, phones see "Waiting for the game…" and rejoin automatically (same player slot)
-  when it reconnects with the same code.
+- Rooms are 4-character codes chosen by the game; if one is taken the game picks another. The match code
+  players type is this room code.
+- If the game disconnects, phones see "Waiting for the game…" (an online guest shows *reconnecting*) and
+  rejoin automatically, in the same player slot, when it reconnects with the same code.
+- Up to 8 phones per room; messages over 4096 characters are dropped (game messages and WebRTC offers
+  are well under that).
 - Latency is roughly your network's ping to Cloudflare; unstable Wi-Fi shows up as stutter.

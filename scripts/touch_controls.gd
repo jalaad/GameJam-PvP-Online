@@ -6,6 +6,14 @@ extends Control
 ##
 ## Where things go is set by the arena (place()), so the controls sit in their own panels next
 ## to or below the arena instead of covering it.
+##
+## Reusable: put it in a CanvasLayer, call place() when the screen size changes, then read
+## `stick` / is_held() every frame and connect button_down for taps. Button names and labels
+## are in BUTTONS; they match the phone controller's so a game can treat both the same way.
+##   var touch := TouchControls.new()
+##   $HUDLayer.add_child(touch)
+##   touch.button_down.connect(func(b): if b == &"attack": attack())
+##   velocity = touch.stick * speed
 
 signal button_down(button: StringName)
 
