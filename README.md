@@ -21,7 +21,10 @@ The menu offers three ways to play:
   through the relay (*via relay*). Desktop builds always use the relay.
 - The host sends the game state 30 times a second. The guest moves its own fighter immediately and
   corrects it from the host's state, and shows the host's fighter 100 ms in the past so it moves smoothly.
-- Hold the phone **sideways**. Left half of the screen: drag anywhere for the joystick. Right: ATK, SHOOT,
+- Hold the phone **either way**: sideways puts the arena in the middle with a control panel on each side;
+  upright puts the arena on top with the controls below it, like a handheld console. Everything scales
+  to the screen and re-arranges if you rotate mid-match. Put your thumb down anywhere on the left half
+  for the joystick; the right side has ATK, SHOOT,
   BLOCK (hold), DASH. **NEXT ROUND** appears after a knockout. **Menu** (top) leaves the match.
 - If the friend's connection drops, their fighter waits 30 seconds for them to come back (reloading the
   page is fine); after that the host is back in the lobby with the same code.

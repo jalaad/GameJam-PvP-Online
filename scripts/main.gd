@@ -46,7 +46,11 @@ var _message: Label
 var _flash_until := 0.0
 var _status_label: Label
 var _menu_button: Button
-var _rotate_notice: Control
+var _camera: Camera2D
+var _hud_layer: CanvasLayer
+var _top_layer: CanvasLayer
+var _lobby_row: BoxContainer
+var _laid_out_for := Vector2.ZERO
 var _lobby: Control
 var _slot_labels: Array[Label] = []
 var _qr_rect: TextureRect
@@ -78,9 +82,9 @@ var _ghost_bullets: Array = []         # [position, color] to draw
 
 
 func _ready() -> void:
-	var cam := Camera2D.new()
-	cam.position = VIEW_SIZE / 2.0
-	add_child(cam)
+	_camera = Camera2D.new()
+	_camera.position = VIEW_SIZE / 2.0
+	add_child(_camera)
 
 	_build_walls()
 	_build_hud()
@@ -89,7 +93,6 @@ func _ready() -> void:
 		f.health_changed.connect(_on_health_changed)
 		f.hurt.connect(_on_fighter_hurt)
 		f.died.connect(_on_fighter_died)
-	get_viewport().size_changed.connect(_layout)
 
 	match Session.mode:
 		Session.Mode.LOCAL:
@@ -169,6 +172,10 @@ func _make_touch_controls() -> void:
 
 
 func _process(delta: float) -> void:
+	var vp := get_viewport().get_visible_rect().size
+	if vp != _laid_out_for:  # resized or rotated
+		_laid_out_for = vp
+		_layout()
 	if Input.is_action_just_pressed("restart") and Session.mode != Session.Mode.ONLINE_GUEST:
 		_on_start_pressed()
 	if _flash_until > 0.0 and Time.get_ticks_msec() / 1000.0 > _flash_until:
@@ -713,21 +720,56 @@ func _share_invite() -> void:
 	_share_button.text = "Link copied!"
 
 
-## Keeps the HUD on the arena when the screen isn't 16:9 (the camera keeps the arena centred).
+## Fits the game to the screen, whatever its size and orientation. The arena and HUD are
+## designed as one 1280x720 view, scaled to fit an area of the screen:
+##   landscape + touch controls: the middle, with a control panel on each side
+##   portrait: the top, with the controls below (like a handheld console)
+##   otherwise (desktop, TV): the whole screen
 func _layout() -> void:
-	var margin := (get_viewport().get_visible_rect().size - VIEW_SIZE) / 2.0
-	for i in _hud_boxes.size():
-		_hud_boxes[i].position = margin + Vector2(40 if i == 0 else 840, 16)
-	_controls_label.position = margin + Vector2(40, 692)
-	_status_label.position = margin + Vector2(440, 14)
-	_menu_button.position = margin + Vector2(590, 44)
-	if _rotate_notice:
-		var size := get_viewport().get_visible_rect().size
-		_rotate_notice.visible = Session.is_online() and DisplayServer.is_touchscreen_available() and size.y > size.x
+	var vp := get_viewport().get_visible_rect().size
+	var area := Rect2(Vector2.ZERO, vp)
+	var portrait := vp.y > vp.x
+	var controls := Rect2()
+	if portrait and _touch:
+		# Arena at the top (below the phone's status bar), controls fill the rest.
+		var arena_h := vp.x * VIEW_SIZE.y / VIEW_SIZE.x
+		var top := minf(vp.y * 0.05, 80.0)
+		area = Rect2(0, top, vp.x, arena_h)
+		controls = Rect2(0, area.end.y, vp.x, vp.y - area.end.y)
+	elif _touch:
+		var side := minf(280.0, vp.x * 0.19)
+		area = Rect2(side, 0, vp.x - side * 2.0, vp.y)
+	var zoom := minf(area.size.x / VIEW_SIZE.x, area.size.y / VIEW_SIZE.y)
+	var view := Rect2(area.get_center() - VIEW_SIZE * zoom / 2.0, VIEW_SIZE * zoom)
+
+	# World: the camera shows the arena scaled into `view`.
+	_camera.zoom = Vector2(zoom, zoom)
+	_camera.position = VIEW_SIZE / 2.0 - (view.get_center() - vp / 2.0) / zoom
+	# HUD: laid out in the same 1280x720 design space, scaled the same way.
+	var t := Transform2D(0.0, Vector2(zoom, zoom), 0.0, view.position)
+	_hud_layer.transform = t
+	_top_layer.transform = t
+	_lobby_row.vertical = portrait
+
+	if _touch:
+		var hud_bottom := view.position.y + 90.0 * zoom  # below the health bars and Menu button
+		var stick_area := Rect2(0, hud_bottom, vp.x / 2.0, vp.y - hud_bottom)
+		if portrait:
+			var s := clampf(controls.size.y / 420.0, 0.8, 1.3)
+			var y := controls.position.y + controls.size.y * 0.58  # a bit low: where thumbs rest
+			_touch.place(Vector2(vp.x * 0.24, y), stick_area, Vector2(vp.x * 0.72, y),
+					Vector2(vp.x / 2.0, controls.position.y + 70.0 * s), s)
+		else:
+			var side := area.position.x
+			var s := clampf((side - 28.0) / 272.0, 0.6, 1.0)
+			var y := vp.y * 0.62
+			_touch.place(Vector2(side / 2.0, y), stick_area, Vector2(vp.x - side / 2.0, y),
+					Vector2(vp.x / 2.0, view.end.y - 70.0 * zoom), s)
 
 
 func _build_hud() -> void:
 	var hud := CanvasLayer.new()
+	_hud_layer = hud
 	add_child(hud)
 
 	for i in 2:
@@ -781,37 +823,31 @@ func _build_hud() -> void:
 	_message = Label.new()
 	_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_message.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_message.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_message.position = Vector2.ZERO
+	_message.size = VIEW_SIZE  # centred on the arena
 	_message.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_message.add_theme_font_size_override("font_size", 40)
 	_message.add_theme_constant_override("outline_size", 12)
 	_message.add_theme_color_override("font_outline_color", Color("#0b0d12"))
 	hud.add_child(_message)
 
+	# HUD positions are in the 1280x720 design space; _layout() scales it onto the screen.
+	for i in 2:
+		_hud_boxes[i].position = Vector2(40 if i == 0 else 840, 16)
+	_controls_label.position = Vector2(40, 692)
+	_status_label.position = Vector2(440, 14)
+
 	# Above the lobby and touch controls so it always works.
-	var top := CanvasLayer.new()
-	top.layer = 3
-	add_child(top)
+	_top_layer = CanvasLayer.new()
+	_top_layer.layer = 3
+	add_child(_top_layer)
 	_menu_button = Button.new()
 	_menu_button.text = "Menu"
-	_menu_button.custom_minimum_size = Vector2(100, 34)
+	_menu_button.position = Vector2(580, 42)
+	_menu_button.custom_minimum_size = Vector2(120, 40)
 	_menu_button.focus_mode = Control.FOCUS_NONE
 	_menu_button.pressed.connect(_leave)
-	top.add_child(_menu_button)
-
-	var notice := ColorRect.new()
-	notice.color = Color("#0b0d12")
-	notice.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	notice.visible = false
-	var turn := Label.new()
-	turn.text = "Turn your phone sideways\nto play"
-	turn.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	turn.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	turn.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	turn.add_theme_font_size_override("font_size", 64)
-	notice.add_child(turn)
-	top.add_child(notice)
-	_rotate_notice = notice
+	_top_layer.add_child(_menu_button)
 
 
 func _build_lobby() -> void:
@@ -828,8 +864,10 @@ func _build_lobby() -> void:
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_lobby.add_child(center)
 
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 56)
+	var row := BoxContainer.new()  # side by side; stacked in portrait (see _layout)
+	_lobby_row = row
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 40)
 	center.add_child(row)
 
 	var qr := TextureRect.new()
@@ -838,6 +876,7 @@ func _build_lobby() -> void:
 	qr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	qr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	qr.custom_minimum_size = Vector2(360, 360)
+	qr.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	row.add_child(qr)
 
 	var col := VBoxContainer.new()

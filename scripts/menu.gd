@@ -168,7 +168,7 @@ func _build_join() -> Control:
 	grid.add_theme_constant_override("v_separation", 6)
 	for ch in PhoneControllerServer._CODE_CHARS:
 		var key := ch
-		grid.add_child(_button(key, Vector2(62, 54), 24, Color("#4a5268"), func() -> void: _type(key)))
+		grid.add_child(_button(key, Vector2(76, 64), 28, Color("#4a5268"), func() -> void: _type(key)))
 	var grid_center := CenterContainer.new()
 	grid_center.add_child(grid)
 	col.add_child(grid_center)
@@ -177,7 +177,7 @@ func _build_join() -> Control:
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 12)
 	row.add_child(_button("Back", Vector2(150, 60), 22, Color("#8a93a6"), func() -> void: _show(_home)))
-	row.add_child(_button("⌫", Vector2(110, 60), 26, Color("#8a93a6"), func() -> void: _type("<")))
+	row.add_child(_button("DEL", Vector2(110, 60), 22, Color("#8a93a6"), func() -> void: _type("<")))
 	row.add_child(_button("JOIN", Vector2(220, 60), 26, Color("#4cc9f0"), _try_join))
 	col.add_child(row)
 	_join_error = _label("", 18, Color("#ff6b6b"))
