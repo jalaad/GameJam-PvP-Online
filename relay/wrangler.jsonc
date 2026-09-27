@@ -3,8 +3,10 @@
   "name": "pvp-phone-relay",
   "main": "src/index.js",
   "compatibility_date": "2025-09-01",
-  // The phone page. `npm run dev` / `npm run deploy` copy ../phone_controller/controller.html here.
-  "assets": { "directory": "./public" },
+  // Built-in phone page, served for rooms whose game didn't upload its own (games upload their
+  // controller.html when they open a room). `npm run dev` / `npm run deploy` copy
+  // ../phone_controller/controller.html here. run_worker_first: the Worker picks the page first.
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
   "durable_objects": {
     "bindings": [{ "name": "ROOMS", "class_name": "Room" }]
   },

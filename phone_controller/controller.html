@@ -1,8 +1,10 @@
 <!doctype html>
 <!--
   Phone controller page ("Play on this screen" mode). One self-contained file, no dependencies.
-  Served by the game itself in LAN mode (?s=SESSION) or by the relay (?r=ROOM; redeploy the relay
-  after changing this file: cd relay && npm run deploy).
+  The game reads it at every PhoneControllers.start(): in LAN mode it serves it itself (?s=SESSION);
+  in relay mode it uploads it to its room and the relay serves it (?r=ROOM). So after editing, just
+  restart the game (and re-export builds); no relay redeploy needed. The relay's own copy of this
+  file is only a fallback for games that don't upload a page.
 
   To reuse in another game:
     - Buttons: each <button data-btn="NAME"> sends NAME to the game (PhoneControllers.button_pressed,
@@ -295,8 +297,15 @@
   let wantConnected = false;
   let joined = false;
   let rejected = null;
+  // Reconnecting: quick at first, then slower, and give up after a while. Every attempt is a
+  // request to the relay (its free plan allows 100,000 a day), so a forgotten phone must not
+  // keep retrying forever.
+  const RETRY_FAST_MS = 4000;          // max delay during the first minute
+  const RETRY_SLOW_MS = 30000;         // max delay after that
+  const GIVE_UP_MS = 10 * 60 * 1000;   // then stop and show the Join button again
   let retryDelay = 500;
   let retryTimer = 0;
+  let failingSince = 0;                // when we last lost the game (0 = not failing)
   let playerName = '';
 
   function connect() {
@@ -313,7 +322,7 @@
     }
     ws = sock;
     sock.onopen = () => {
-      retryDelay = 500;
+      // Not a success yet: the relay also opens then closes at once when no game has the code.
       send({ t: 'hello', s: SESSION, name: playerName, token });
     };
     sock.onmessage = (ev) => {
@@ -344,8 +353,19 @@
   function scheduleRetry() {
     if (!wantConnected) return;
     clearTimeout(retryTimer);
+    const now = Date.now();
+    if (!failingSince) failingSince = now;
+    if (now - failingSince > GIVE_UP_MS) {
+      wantConnected = false;
+      releaseAll(false);
+      showJoin('Lost the game. Check it is still running, then tap Join to reconnect.');
+      setStatus('disconnected');
+      return;
+    }
+    if (document.hidden) return;  // resumes when the page is visible again (visibilitychange)
     retryTimer = setTimeout(connect, retryDelay);
-    retryDelay = Math.min(retryDelay * 1.6, 4000);
+    const cap = now - failingSince < 60000 ? RETRY_FAST_MS : RETRY_SLOW_MS;
+    retryDelay = Math.min(retryDelay * 1.6, cap);
   }
 
   function send(obj) {
@@ -356,6 +376,8 @@
     switch (m.t) {
       case 'welcome':
         joined = true;
+        retryDelay = 500;  // connected for real: next drop starts retrying quickly again
+        failingSince = 0;
         if (m.color) document.documentElement.style.setProperty('--accent', m.color);
         $('pname').textContent = m.name || 'Player ' + m.id;
         showPad();
@@ -586,6 +608,7 @@
     buzz(1);           // unlocks vibration on some browsers
     wantConnected = true;
     retryDelay = 500;
+    failingSince = 0;
     connect();
   });
 })();

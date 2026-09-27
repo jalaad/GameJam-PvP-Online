@@ -106,10 +106,12 @@ export_presets.cfg            Web (single-threaded) and Windows Desktop exports
 .github/workflows/pages.yml   builds the web version and publishes it to GitHub Pages
 phone_controller/
   controller.html             the phone controller page (attack/shoot/block/dash/start)
-  phone_controller_server.gd  phones -> game: LAN server (HTTP 8080 + WebSocket 8081) or relay client;
+  phone_controller_server.gd  phones -> game: LAN server (HTTP 8080 + WebSocket 8081) or relay client
+                              (uploads controller.html to its room);
                               WebRTC direct link (host side) for online matches
   qr_code.gd                  QR code generator
-relay/                        Cloudflare Worker that pairs games and phones by room code
+relay/                        Cloudflare Worker: pairs games and devices by room code, serves each
+                              room the controller page its game uploaded
 docs/REUSE.md                 how to reuse the multiplayer parts in another game
 scenes/  menu.tscn (start screen) · main.tscn (arena) · fighter.tscn · bullet.tscn
 scripts/
@@ -133,6 +135,13 @@ scripts/
   (a phone that locks or switches apps pauses the browser tab).
 - **"That match is full":** a match has one host and one guest. If your friend reloaded, they get their
   slot back automatically.
+- **Nothing connects; the relay answers 429 / "temporarily rate limited" (Cloudflare error 1027):** the
+  relay's free daily request allowance is used up (100,000 requests a day, shared by every game on the
+  relay; resets at 00:00 UTC). Usually a controller page or game tab left reconnecting; see the
+  [relay README](relay/README.md#costs-and-the-free-plans-daily-limit).
+- **Edits to `controller.html` don't show on phones:** restart the game (re-export builds). The game reads
+  the page at every start and serves it itself (LAN) or uploads it to its relay room. If the game uses an
+  older `phone_controller_server.gd` without `upload_page_to_relay`, phones get the relay's built-in page.
 - **Status says *via relay*:** that network blocks direct connections (common on some mobile networks).
   The game still works, with a little more delay.
 - **Phone controller can't open the page (desktop build):** allow Godot through Windows Firewall (Private),

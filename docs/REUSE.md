@@ -35,9 +35,9 @@ covers which part does what, what to copy, and how to wire each feature into you
 | File | What it does | Reuse |
 |---|---|---|
 | `phone_controller/phone_controller_server.gd` | The game's side of every remote connection. Handles the LAN server or relay client, the player list, input, rejoin by token, `send` / `send_fast`, and the host side of WebRTC | **As is** |
-| `phone_controller/controller.html` | The phone controller page: joystick, buttons, reconnect, vibration | **As is**; edit the buttons and look |
+| `phone_controller/controller.html` | The phone controller page: joystick, buttons, reconnect, vibration. The game serves it itself (LAN) or uploads it to its relay room, so edits show up after a restart in both modes | **As is**; edit the buttons and look |
 | `phone_controller/qr_code.gd` | QR code generator for the join link | **As is** |
-| `relay/` | Cloudflare Worker that pairs a game with its devices by room code | **As is** (deploy your own or share this one) |
+| `relay/` | Cloudflare Worker that pairs a game with its devices by room code, and serves each room the controller page its game uploaded | **As is** (share this one, or deploy your own under a new name) |
 | `scripts/online_guest.gd` | The guest side of an online match: joins the host's room, sends input, receives state, and handles the guest side of WebRTC | **As is** |
 | `scripts/touch_controls.gd` | On-screen joystick and buttons with multi-touch, placed by the game | **As is**; edit `BUTTONS` |
 | `scripts/session.gd` | Stores the menu choice (mode and code), reads `?join=` links, and switches between portrait and landscape design sizes | **As is**; change `PAGES_URL` |
@@ -65,8 +65,14 @@ covers which part does what, what to copy, and how to wire each feature into you
    `phone_controller/*.html`; under *Filters to exclude*, add `relay/*`. For the web export, turn thread
    support **off**, so it runs on GitHub Pages and itch.io without special headers.
 5. **Pick a relay.** Either:
-   - keep `DEFAULT_RELAY_URL` in `phone_controller_server.gd` pointing at the existing relay, or
+   - keep `DEFAULT_RELAY_URL` in `phone_controller_server.gd` pointing at the existing relay. Your game
+     uploads its own `controller.html` to its room, so sharing a relay doesn't mix up controller pages.
+     The daily request allowance is shared too, though (section 7), or
    - deploy your own copy of `relay/` (see [relay/README.md](../relay/README.md)) and change the URL.
+     **Change `"name"` in `relay/wrangler.jsonc` first:** deploying with an existing name to the same
+     Cloudflare account replaces that relay.
+   - Either way, use a `phone_controller_server.gd` that uploads the page (it has `upload_page_to_relay`).
+     An older copy doesn't, and its phones get the relay's built-in page instead of yours.
 
    Also change `PAGES_URL` in `session.gd` to where your web build will live.
 6. **Choose when it starts.** `PhoneControllers.auto_start` is off, so nothing opens until your game calls
@@ -106,6 +112,14 @@ func _on_button(id: int, button: StringName) -> void:   # one call per tap, neve
 
 - **Button names** come from `data-btn="..."` in `controller.html`. Rename or add buttons there and your game
   receives the new names. The small top button is `start`.
+- **Changing the page:** edit `phone_controller/controller.html`, then restart the game (or re-export). The
+  page is read at every `start()`:
+  - in LAN mode the game serves it itself
+  - in relay mode it uploads it to its room, and the relay serves it at `/?r=CODE`
+
+  No relay redeploy is needed. If phones still show an old page, check the join link: `…workers.dev/?r=`
+  means relay mode, `http://192.168.x.x:8080/?s=` means LAN mode. Then make sure the game you're running
+  is the project you edited.
 - **Feedback to the phone:** `vibrate(id, ms_or_pattern)`, `send_text(id, "FIGHT!")`,
   `set_player_theme(id, color, label)`.
 - **Dropped phones:** a phone that drops (screen lock, Wi-Fi blip) fires `player_disconnected`. It keeps
@@ -237,6 +251,10 @@ messages wrapped as `{"c": id, "m": {...}}`; `PhoneControllerServer` unwraps the
 | game → device | `theme`, `msg`, `vibrate` | Controller look, a banner message, rumble |
 | game → device | anything via `send` / `send_fast` | This game sends `st` (snapshot: `ts`, `q`, `ph` phase, `w` winner, `sc` scores, `f` fighter states, `b` bullets) |
 
+Between the game and the relay only (not forwarded): the relay sends `_room {room}` when the room is open;
+the game then sends `_page {html}` (its controller page, served at `/?r=CODE`) and wraps device traffic as
+`{"c": id, "m": {...}}` / `{"c": id, "close": reason}`; `"ping"` / `"pong"` keep the socket alive.
+
 Relay close codes that devices see: 4004 `no_game` (no game has that code), 4005 `host_left`, 4001 with a
 reason, 4009 `room_taken` (host side, when a new code is picked automatically).
 
@@ -248,9 +266,20 @@ reason, 4009 `room_taken` (host side, when a new code is picked automatically).
   builds use the relay for online play. It still works, with a bit more delay.
 - **Keep the host in the foreground.** A browser tab pauses when the phone locks or switches apps, which
   pauses the match for both players.
-- **Relay limits:** at most 8 devices per room, and messages over 4096 characters are dropped. There's no
-  authentication: anyone with the code can join (the host's `max_players` still applies).
-- **Costs:** the free Cloudflare plan covers casual use; see relay/README.md.
+- **Relay limits:** at most 8 devices per room. Forwarded messages over 4096 characters are dropped, and an
+  uploaded controller page can be up to 512 KB. There's no authentication: anyone with the code can join
+  (the host's `max_players` still applies).
+- **The free plan's daily request limit:** 100,000 requests a day, shared by every game using the same
+  relay; it resets at 00:00 UTC.
+  - Every page load and every (re)connect counts; messages on an open connection don't.
+  - Once it's used up, the relay answers everything with **429 / Cloudflare error 1027**: phones can't join
+    and matches can't connect.
+  - All clients here back off and eventually give up when the other side is gone (table in
+    [relay/README.md](../relay/README.md)). Keep that if you change the reconnect code.
+  - Don't call `PhoneControllers.start()` repeatedly (e.g. every frame): each call opens a new room.
+  - Close controller pages and game tabs you aren't using.
+- **Costs:** the free Cloudflare plan covers casual use; the Workers Paid plan lifts the daily limit. See
+  relay/README.md.
 - **Balance and fairness:** the host has zero latency and the guest has one round trip. Prediction hides
   most of that for movement; hits are always decided by the host.
 
