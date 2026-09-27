@@ -79,8 +79,14 @@ const PAGE_PATH := "res://phone_controller/controller.html"
 const COLORS := ["#4cc9f0", "#f72585", "#b8f35a", "#ffb703", "#9b5de5", "#ff6b35", "#2ec4b6", "#e0e0e0"]
 ## Characters used in session/room codes (no 0/O or 1/I, so codes are easy to read and type).
 const CODE_CHARS := "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-## Relay used by web builds. Override per project with the Project Setting phone_controllers/relay_url.
-const DEFAULT_RELAY_URL := "wss://pvp-phone-relay.pvp-phone-relay.workers.dev"
+## Known relays (the same relay/ code deployed on two Cloudflare accounts; each account has its own
+## free daily request allowance, see relay/README.md).
+const RELAY_MAIN := "wss://pvp-phone-relay.pvp-phone-relay.workers.dev"
+const RELAY_BACKUP := "wss://pvp-phone-relay.gamejam-relay.workers.dev"
+## The relay to use when nothing overrides it (see _pick_relay_url: ?relay=, PHONE_RELAY_URL,
+## the Project Setting phone_controllers/relay_url). To switch, change this one word:
+## RELAY_BACKUP while the main relay is over its daily limit, RELAY_MAIN normally.
+const DEFAULT_RELAY_URL := RELAY_BACKUP
 ## "auto" = relay in web builds, LAN elsewhere. Override with phone_controllers/mode ("lan" / "relay").
 const DEFAULT_MODE := "auto"
 const _RELAY_PING_SEC := 20.0
@@ -157,12 +163,37 @@ var _relay_no_delay_set := false
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keep phones connected while the game is paused
-	_relay_url = str(ProjectSettings.get_setting("phone_controllers/relay_url", "")).strip_edges()
-	if _relay_url == "":
-		_relay_url = DEFAULT_RELAY_URL
-	_relay_url = _relay_url.trim_suffix("/")
+	_relay_url = _pick_relay_url()
 	if auto_start:
 		start()
+
+
+## Which relay to use, first match wins (so a relay can be swapped without editing code):
+##   1. web builds: ?relay=... in the page address (e.g. ?relay=my-relay.me.workers.dev)
+##   2. desktop: the PHONE_RELAY_URL environment variable
+##   3. the Project Setting phone_controllers/relay_url (or an override.cfg)
+##   4. DEFAULT_RELAY_URL
+## Accepts a full wss:// / ws:// URL or just a host name (wss:// is assumed).
+static func _pick_relay_url() -> String:
+	var url := ""
+	if OS.has_feature("web"):
+		url = str(JavaScriptBridge.eval("new URLSearchParams(window.location.search).get('relay') || ''"))
+	if url == "":
+		url = OS.get_environment("PHONE_RELAY_URL")
+	if url == "":
+		url = str(ProjectSettings.get_setting("phone_controllers/relay_url", ""))
+	url = url.strip_edges()
+	if url == "":
+		url = DEFAULT_RELAY_URL
+	if not url.begins_with("ws://") and not url.begins_with("wss://"):
+		url = "wss://" + url.trim_prefix("https://").trim_prefix("http://")
+	return url.trim_suffix("/")
+
+
+## True when the relay in use isn't DEFAULT_RELAY_URL (e.g. picked with ?relay=). Invite links
+## then carry it along so the friend's game uses the same relay.
+func is_custom_relay() -> bool:
+	return get_relay_url() != DEFAULT_RELAY_URL
 
 
 func _exit_tree() -> void:
@@ -173,6 +204,8 @@ func _exit_tree() -> void:
 
 ## Relay address (wss://...), also used by OnlineGuest to join a host's room.
 func get_relay_url() -> String:
+	if _relay_url == "":  # asked before _ready() (e.g. from another autoload)
+		_relay_url = _pick_relay_url()
 	return _relay_url
 
 
@@ -191,6 +224,7 @@ func start(force_mode := "") -> Error:
 	if mode == "":
 		mode = DEFAULT_MODE
 	_use_relay = mode == "relay" or (mode == "auto" and OS.has_feature("web"))
+	get_relay_url()  # make sure the relay is picked even if start() runs before _ready()
 	_load_page()
 	_relay_retry_delay = _RELAY_RETRY_SEC
 	_new_session_code()

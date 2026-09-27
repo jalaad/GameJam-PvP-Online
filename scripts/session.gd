@@ -55,5 +55,10 @@ static func clean_code(text: String) -> String:
 	return out.left(4)
 
 
+## PAGES_URL?join=CODE, plus &relay=... when this game uses a relay other than the default
+## (picked with ?relay=), so the friend's game joins the same relay.
 static func invite_url(code: String) -> String:
-	return "%s?join=%s" % [PAGES_URL, code]
+	var url := "%s?join=%s" % [PAGES_URL, code]
+	if PhoneControllers.is_custom_relay():
+		url += "&relay=" + PhoneControllers.get_relay_url().uri_encode()
+	return url

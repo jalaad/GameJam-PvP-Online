@@ -65,7 +65,9 @@ covers which part does what, what to copy, and how to wire each feature into you
    `phone_controller/*.html`; under *Filters to exclude*, add `relay/*`. For the web export, turn thread
    support **off**, so it runs on GitHub Pages and itch.io without special headers.
 5. **Pick a relay.** Either:
-   - keep `DEFAULT_RELAY_URL` in `phone_controller_server.gd` pointing at the existing relay. Your game
+   - keep `DEFAULT_RELAY_URL` in `phone_controller_server.gd` pointing at one of the existing relays
+     (`RELAY_MAIN` / `RELAY_BACKUP`; switching options in
+     [relay/README.md](../relay/README.md#switching-to-another-relay-and-back)). Your game
      uploads its own `controller.html` to its room, so sharing a relay doesn't mix up controller pages.
      The daily request allowance is shared too, though (section 7), or
    - deploy your own copy of `relay/` (see [relay/README.md](../relay/README.md)) and change the URL.

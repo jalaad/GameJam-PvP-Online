@@ -65,7 +65,8 @@ after that you're back in the lobby with the same code.
 3. The match starts automatically once both phones join. Playing with the keyboard? Press **Enter** to start
    now. **Tab** brings the QR code back up, **Esc** goes back to the menu.
 
-How phones reach the game (chosen automatically; see `DEFAULT_MODE` / `DEFAULT_RELAY_URL` at the top of
+How phones reach the game (chosen automatically; see `DEFAULT_MODE` / `DEFAULT_RELAY_URL` (which relay; see
+[switching relays](relay/README.md#switching-to-another-relay-and-back)) at the top of
 `phone_controller/phone_controller_server.gd`):
 
 | Build | How phones reach the game | Needs |
@@ -138,7 +139,9 @@ scripts/
 - **Nothing connects; the relay answers 429 / "temporarily rate limited" (Cloudflare error 1027):** the
   relay's free daily request allowance is used up (100,000 requests a day, shared by every game on the
   relay; resets at 00:00 UTC). Usually a controller page or game tab left reconnecting; see the
-  [relay README](relay/README.md#costs-and-the-free-plans-daily-limit).
+  [relay README](relay/README.md#costs-and-the-free-plans-daily-limit). To keep playing meanwhile, switch
+  to the other relay: add `?relay=pvp-phone-relay.gamejam-relay.workers.dev` (or `…pvp-phone-relay…`) to
+  the game's address, or change `DEFAULT_RELAY_URL` ([how](relay/README.md#switching-to-another-relay-and-back)).
 - **Edits to `controller.html` don't show on phones:** restart the game (re-export builds). The game reads
   the page at every start and serves it itself (LAN) or uploads it to its relay room. If the game uses an
   older `phone_controller_server.gd` without `upload_page_to_relay`, phones get the relay's built-in page.
